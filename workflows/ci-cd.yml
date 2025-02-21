@@ -1,0 +1,78 @@
+name: Construcción y despliegue de una aplicación MVC a Azure
+
+env:
+  AZURE_WEBAPP_NAME: upt-awa-495  # Aqui va el nombre de su aplicación
+  DOTNET_VERSION: '8'                     # la versión de .NET
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Login to GitHub Container Registry'
+        uses: docker/login-action@v3
+        with:
+            registry: ghcr.io
+            username: ${{github.actor}}
+            password: ${{secrets.TOKEN_GITHUB}}
+
+      - name: 'Build Inventory Image'
+        run: |
+            docker build ./src --tag ghcr.io/gerardocll95/shorten:${{github.sha}}
+            docker push ghcr.io/gerardocll95/shorten:${{github.sha}}
+
+  deploy:
+    permissions:
+      contents: none
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: 'Development'
+      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+
+    steps:
+      - name: Desplegar a Azure Web App
+        id: deploy-to-webapp
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: ghcr.io/gerardocll95/shorten:${{github.sha}}
+    
+  security_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar tfsec
+        run: |
+          wget -qO- https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64 > tfsec
+          chmod +x tfsec
+          sudo mv tfsec /usr/local/bin/
+
+      - name: Ejecutar tfsec
+        run: tfsec .
+
+  semgrep_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Semgrep
+        run: pip install semgrep
+
+      - name: Ejecutar Semgrep
+        run: semgrep --config=auto .
+
